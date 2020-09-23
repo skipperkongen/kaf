@@ -23,12 +23,23 @@ consumer_conf = {'bootstrap.servers': 'kafka:9092', 'group.id': 'myapp'}
 producer_conf = {'bootstrap.servers': 'kafka:9092'}
 
 app = KafkaApp('myapp', consumer_conf, producer_conf)
+counter_ok = 0
+counter_failed = 0
 
 app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
 def uppercase_messages(msg):
   return {'message_upper': msg['message'].upper()}
+
+@app.on_processed
+def inc_ok(stats):
+  counter_ok += 1
+
+@app.on_failed
+def inc_failed(stats):
+  counter_failed += 1
+
 
 if __name__ == '__main__':
   app.run()
