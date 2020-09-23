@@ -45,7 +45,18 @@ Features to be added:
 
 - Add decorators for app events `on_consume`, `on_processed` and `on_publised`. This will allow to hook up e.g. Datadog metrics to these events.
 
-## Tutorials followed while writing this code
+## How to deploy a new version
+
+Steps (can maybe be improved):
+
+1. change version in setup.py
+1. git add + commit + push
+1. create new release in GitHub
+1. update download_url in setup.py
+1. git add + commit + push (again)
+1. Run `python setup.py sdist`
+1. Run `twine upload dist/* --verbose` (if not installed, `pip install twine` first)
+
 
 Links:
 
