@@ -34,13 +34,12 @@ def uppercase_everything(msg):
   return {key:str(val).upper() for key, val in msg.items()}
 
 @app.on_processed
-def inc_ok(stats):
-  counter_ok += 1
+def inc_ok(msg, seconds_elapsed):
+    counter_ok += 1
 
 @app.on_failed
-def inc_failed(stats):
-  counter_failed += 1
-
+def inc_failed(msg, error):
+    counter_failed += 1
 
 if __name__ == '__main__':
   app.run()

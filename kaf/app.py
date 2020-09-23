@@ -48,22 +48,14 @@ class KafkaApp:
                             else:
                                 logger.info(f'No producer set')
                         t1 = time.perf_counter()
-                        stats = {
-                            'seconds_elapsed': t1 - t0,
-                            'message': msg
-                        }
                         for callback in self.on_processed_callbacks:
-                            callback(stats)
+                            callback(msg, t1 - t0)
                     except Exception as inner_error:
                         # An unhandled exception occured while handling message
                         self.logger.error(inner_error)
                         self._heal()
-                        stats = {
-                            'error': inner_error,
-                            'message': msg
-                        }
                         for callback in self.on_failed_callbacks:
-                            callback(stats)
+                            callback(msg, inner_error)
                     finally:
                         # completely done with message, commit it
                         msg.commit()

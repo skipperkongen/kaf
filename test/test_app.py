@@ -34,11 +34,11 @@ class TestKafkaApp(unittest.TestCase):
             return {}
 
         @self.app.on_processed
-        def inc_ok(stats):
+        def inc_ok(msg, seconds_elapsed):
             self.counter_ok += 1
 
         @self.app.on_failed
-        def inc_failed(stats):
+        def inc_failed(msg, error):
             self.counter_failed += 1
 
 
