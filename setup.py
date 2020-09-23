@@ -14,7 +14,7 @@ setuptools.setup(
      long_description=long_description,
      long_description_content_type="text/markdown",
      url="https://github.com/skipperkongen/kaf",
-     packages=setuptools.find_packages(),
+     packages=['kaf'],
      install_requires=[
         'confluent_kafka'
      ],

@@ -2,6 +2,7 @@ import logging
 import functools
 import time
 import json
+import pdb
 
 from confluent_kafka import Consumer, Producer, KafkaError
 
@@ -9,21 +10,24 @@ logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
 
 class KafkaApp:
 
-    def __init__(self, name, consumer_conf=None, producer_conf=None, producer_topic=None, consumer_batch_size=1, consumer_timeout=1800):
+    def __init__(self, name, consumer_conf, producer_conf, consumer_batch_size=1, consumer_timeout=1800):
         self.name = name
         self.consumer_conf = consumer_conf
         self.producer_conf = producer_conf
-        self.batch_size = batch_size
         self.processors = []
+        self.subs = {}
         self.error_handlers = []
         self.logger = logging.getLogger(name)
         self.consumer_batch_size = consumer_batch_size
         self.consumer_timeout = consumer_timeout
-        self.producer_topic = producer_topic
 
     def _initialise_clients(self):
         self.consumer = Consumer(self.consumer_conf)
-        self.producer = Consumer(self.producer_cons)
+        self.producer = Producer(self.producer_conf)
+        self.consumer.subscribe(self.subs.keys())
+
+    def run2(self):
+        pdb.set_trace()
 
     def run(self):
         """
@@ -45,10 +49,10 @@ class KafkaApp:
                         else:
                             # Some other error. Raise exception and chill
                             raise Exception(msg.error())
-                    for process in self.processors:
+                    for process, publish_to in self.subs[msg.topic]:
                         result = process(msg)
-                        if (self.producer and self.producer_topic) is not None:
-                            self.producer.publish(result)
+                        if publish_to is not None:
+                            self.producer.publish(result, topic=publish_to)
                         else:
                             logger.info(f'No producer set')
                     self.consumer.commit(msg)
@@ -70,19 +74,22 @@ class KafkaApp:
             self.logger.info(f'Read {len(msgs)} new messages')
         return msgs
 
-    def _produce(self, value):
-        self.producer.produce(topic=self.producer_topic,
-                       value=json.dumps(value.as_dict()).encode('utf-8'))
-        logger.info(f'Message produced: {json.dumps(value.as_dict())}')
+    def _produce(self, message, publish_to):
+        self.producer.produce(topic=publish_to,
+                       value=json.dumps(message.as_dict()).encode('utf-8'))
+        logger.info(f'Message produced: {json.dumps(message.as_dict())}')
         self.producer.poll(0)
 
 
-    def process(self, func):
+    def process(self, topic, publish_to=None):
         """
         Use to decorate functions that process single events
         """
-        self.processors.append(func)
-        return func
+        def process_decorator(func):
+            sub = (func, publish_to)
+            self.subs.setdefault(topic, []).append(sub)
+            return func
+        return process_decorator
 
     def handle_error(self, func):
         """
