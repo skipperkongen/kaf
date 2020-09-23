@@ -6,6 +6,8 @@ with open("README.md", "r") as fh:
 setuptools.setup(
      name='kaf',
      version='v0.1-alpha',
+     download_url='https://github.com/skipperkongen/kaf/archive/v0.1-alpha.tar.gz',
+     licence='MIT',
      author="Pimin Konstantin Kefaloukos",
      author_email="skipperongen@gmail.com",
      description="A mini-framework for Kafka apps",
