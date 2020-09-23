@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
      name='kaf',
-     version='0.1',
+     version='v0.1-alpha',
      author="Pimin Konstantin Kefaloukos",
      author_email="skipperongen@gmail.com",
      description="A mini-framework for Kafka apps",
