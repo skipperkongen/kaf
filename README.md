@@ -30,8 +30,8 @@ counter_failed = 0
 app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
-def uppercase_messages(msg):
-  return {'message_upper': msg['message'].upper()}
+def uppercase_everything(msg):
+  return {key:str(val).upper() for key, val in msg.items()}
 
 @app.on_processed
 def inc_ok(stats):
