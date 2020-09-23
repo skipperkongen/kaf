@@ -51,14 +51,15 @@ Steps (can maybe be improved):
 
 1. change version in setup.py
 1. git add + commit + push
-1. create new release in GitHub
+1. create new release in GitHub (copy link)
 1. update download_url in setup.py
 1. git add + commit + push (again)
 1. Run `python setup.py sdist`
 1. Run `twine upload dist/* --verbose` (if not installed, `pip install twine` first)
 
 
-Links:
+
+Useful links used:
 
 - https://realpython.com/primer-on-python-decorators/#registering-plugins
 - https://medium.com/@joel.barmettler/how-to-upload-your-python-package-to-pypi-65edc5fe9c56
