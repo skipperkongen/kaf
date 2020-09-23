@@ -17,10 +17,11 @@ app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
 def process(msg):
+    return {'uppercased': msg['message'].upper()}
     if random.random() < 0.1:
         raise Exception('Something went wrong')
     else:
         return {'foo': 'bars'}
 
 if __name__ == '__main__':
-    app.run2()
+    app.run()
