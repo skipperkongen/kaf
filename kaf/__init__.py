@@ -3,7 +3,7 @@ import functools
 import time
 import json
 
-from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
+from confluent_kafka import Consumer, Producer, KafkaError
 
 logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
 
@@ -56,7 +56,7 @@ class KafkaApp:
                 self.logger.error(error)
                 self.logger.info(f"Recreating clients and sleeping for 10 seconds.")
                 self._initialise_clients()
-                time.sleep(10)
+                time.sleep(3)
 
     def _consume(self):
         msgs = self.consumer.consume(
