@@ -80,7 +80,6 @@ class KafkaApp:
             return result
         return Result(value=result)
 
-
     def _process_message(self, msg):
         msg_error = msg.error()
         if msg_error is None:
@@ -88,9 +87,8 @@ class KafkaApp:
             subs = self._get_subs(msg.topic)
             for func, publish_to in subs:
                 value_dict = json.loads(msg.value())
-                result = func(value_dict)  # should be instance of Result
-                result = self._coalesce_result(result)
-                if (result and publish_to) is not None:
+                for result in func(value_dict):
+                    result = self._coalesce_result(result)
                     yield result, publish_to
         elif msg_error == KafkaError._PARTITION_EOF:
             # Log the EOF, but don't process the message further

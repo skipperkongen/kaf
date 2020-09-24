@@ -32,7 +32,7 @@ app.logger.setLevel(logging.INFO)
 @app.process(topic='foo', publish_to='bar')
 def uppercase_everything(msg):
   value = {key:str(val).upper() for key, val in msg.items()}
-  return Result(key='mykey', value=value)
+  yield Result(key='mykey', value=value)
 
 @app.on_processed
 def inc_ok(msg, seconds_elapsed):
