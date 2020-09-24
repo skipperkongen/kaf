@@ -4,7 +4,7 @@ import json
 import logging
 import time
 
-from confluent_kafka import Consumer, Producer, KafkaError
+from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
 
 logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
 
@@ -47,31 +47,41 @@ class KafkaApp:
                 msgs = self._consume()
                 for msg in msgs:
                     t0 = time.perf_counter()
-                    # process a single message
-                    try:
-                        outcomes = self._process_message(msg)
-                        for result, publish_to in outcomes:
-                            if publish_to is not None:
-                                self._produce(result, publish_to=publish_to)
-                            else:
-                                logger.info(f'No producer set')
-                        t1 = time.perf_counter()
-                        for callback in self.on_processed_callbacks:
-                            callback(msg, t1 - t0)
-                    except Exception as inner_error:
-                        # An unhandled exception occured while handling message
-                        self.logger.error(inner_error)
-                        self._heal()
-                        for callback in self.on_failed_callbacks:
-                            callback(msg, inner_error)
-                    finally:
-                        # completely done with message, commit it
-                        msg.commit()
+                    if msg.error() is not None:
+                        if msg.error().code() == KafkaError._PARTITION_EOF:
+                            logger.info(
+                                f' {msg.topic()}[{msg.partition()}] reached end \
+                                of offset {msg.offset()}')
+                        else:
+                            logger.error(f' Fatal error: {msg.error()}')
+                            self.consumer.commit(msg)
+                            raise KafkaException(msg.error())
+                    else:
+                        try:
+                            for result, publish_to in self._process_message(msg):
+                                if publish_to is not None:
+                                    self._produce(result, publish_to=publish_to)
+                                else:
+                                    logger.info(f'No producer set')
+                            t1 = time.perf_counter()
+                            for callback in self.on_processed_callbacks:
+                                callback(msg, t1 - t0)
+                        except JSONDecodeError as error:
+                            # Non-retriable error
+                            logger.error(error)
+                            for callback in self.on_failed_callbacks:
+                                callback(msg, inner_error)
+                        finally:
+                            self.consumer.commit(msg)
+            except(BufferError):
+                self.logger.info('Sleeping for 10 seconds.')
+                time.sleep(10)
             except Exception as error:
-                # An unhandled exception occured in the pipeline
-                self.logger.error(error)  # BOMB, if fails app crashes
-                self._heal()  # BOMB, if fails app crashes
-
+                self.logger.error(error)
+                self.logger.info('Re-initialising clients')
+                self._initialise_clients()
+                self.logger.info('Sleeping for 5 seconds.')
+                time.sleep(10)
 
     def _coalesce_result(self, result):
         if result is None:
@@ -95,13 +105,6 @@ class KafkaApp:
             self.logger.info(f'{msg.topic()}[{msg.partition()}] reached end of offset {msg.offset()}')
         else:
             raise Exception(msg_error)
-
-
-    def _heal(self, seconds=3):
-        self.logger.info(f"Recreating clients and sleeping for 3 seconds.")
-        self._initialise_clients()
-        time.sleep(seconds)
-
 
     def _get_subs(self, topic):
         return self.subs.get(topic) or []
