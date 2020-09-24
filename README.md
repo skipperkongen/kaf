@@ -18,7 +18,7 @@ Hello world:
 ```python
 import logging
 
-from kaf import KafkaApp
+from kaf import KafkaApp, Result
 
 consumer_conf = {'bootstrap.servers': 'kafka:9092', 'group.id': 'myapp'}
 producer_conf = {'bootstrap.servers': 'kafka:9092'}
@@ -31,7 +31,8 @@ app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
 def uppercase_everything(msg):
-  return {key:str(val).upper() for key, val in msg.items()}
+  value = {key:str(val).upper() for key, val in msg.items()}
+  return Result(key='mykey', value=value)
 
 @app.on_processed
 def inc_ok(msg, seconds_elapsed):

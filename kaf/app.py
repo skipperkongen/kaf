@@ -1,11 +1,19 @@
-import logging
+import dataclasses as dc
 import functools
-import time
 import json
+import logging
+import time
 
 from confluent_kafka import Consumer, Producer, KafkaError
 
 logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
+
+
+@dc.dataclass(unsafe_hash=True)
+class Result:
+    value: dict
+    key: object = None
+
 
 class KafkaApp:
 
@@ -65,6 +73,14 @@ class KafkaApp:
                 self._heal()  # BOMB, if fails app crashes
 
 
+    def _coalesce_result(self, result):
+        if result is None:
+            return result
+        if isinstance(result, Result):
+            return result
+        return Result(value=result)
+
+
     def _process_message(self, msg):
         msg_error = msg.error()
         if msg_error is None:
@@ -72,8 +88,10 @@ class KafkaApp:
             subs = self._get_subs(msg.topic)
             for func, publish_to in subs:
                 value_dict = json.loads(msg.value())
-                result = func(value_dict)
-                yield result, publish_to
+                result = func(value_dict)  # should be instance of Result
+                result = self._coalesce_result(result)
+                if (result and publish_to) is not None:
+                    yield result, publish_to
         elif msg_error == KafkaError._PARTITION_EOF:
             # Log the EOF, but don't process the message further
             self.logger.info(f'{msg.topic()}[{msg.partition()}] reached end of offset {msg.offset()}')
@@ -107,7 +125,8 @@ class KafkaApp:
     def _produce(self, message, publish_to):
         self.producer.produce(
             topic=publish_to,
-            value=json.dumps(message).encode('utf-8')
+            key=message.key,
+            value=json.dumps(message.value).encode('utf-8')
         )
         logger.info(f'Message produced: {json.dumps(message.as_dict())}')
         self.producer.poll(0)
