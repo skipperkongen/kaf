@@ -20,7 +20,10 @@ class TestKafkaApp(unittest.TestCase):
 
     def setUp(self):
 
-        self.app = KafkaApp('', {}, {})
+        self.app = KafkaApp(
+            'testapp',
+            consumer_config={'bootstrap.servers': 'kafka:9092', 'group.id': '0'},
+            producer_config={'bootstrap.servers': 'kafka:9092'})
         self.counter_ok = 0
         self.counter_failed = 0
 
@@ -52,7 +55,7 @@ class TestKafkaApp(unittest.TestCase):
 
     def test_3(self):
         subs = self.app._get_subs('foo')
-        for func,publish_to in subs:
+        for func, publish_to in subs:
             input = {'message': 'foo'}
             output = func(input)
             self.assertTrue(callable(func))
@@ -75,7 +78,7 @@ class TestKafkaApp(unittest.TestCase):
 
 
     def test_6(self):
-        msg = Message(topic='foo2', value='{"foo": "bar"}', error=None, partition=0, offset=0)
+        msg = Message(topic=lambda: 'foo2', value=lambda:'{"foo": "bar"}', error=lambda:None, partition=lambda:0, offset=lambda:0)
         for result, publish_to in self.app._process_message(msg):
             self.assertTrue(type(result) == dict)
 

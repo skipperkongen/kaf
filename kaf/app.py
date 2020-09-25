@@ -2,9 +2,13 @@ import dataclasses as dc
 import functools
 import json
 import logging
+import random
+import signal
+import sys
 import time
 
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
+from retrying import retry
 
 logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
 
@@ -17,10 +21,10 @@ class Result:
 
 class KafkaApp:
 
-    def __init__(self, name, consumer_conf, producer_conf, consumer_batch_size=1, consumer_timeout=1800):
+    def __init__(self, name, consumer_config, producer_config, consumer_batch_size=1, consumer_timeout=60):
         self.name = name
-        self.consumer_conf = consumer_conf
-        self.producer_conf = producer_conf
+        self.consumer_config = consumer_config
+        self.producer_config = producer_config
         self.processors = []
         self.subs = {}
         self.logger = logging.getLogger(name)
@@ -28,89 +32,99 @@ class KafkaApp:
         self.consumer_timeout = consumer_timeout
         self.on_processed_callbacks = []
         self.on_failed_callbacks = []
+        #self.consumer = Consumer(consumer_config)
+        #self.producer = Producer(producer_config)
+        signal.signal(signal.SIGINT, self.exit_gracefully)
+        signal.signal(signal.SIGTERM, self.exit_gracefully)
 
+    def exit_gracefully(self, signum, frame):
+        self.producer.flush()
+        sys.exit()
 
     def _initialise_clients(self):
-        self.consumer = Consumer(self.consumer_conf)
-        self.producer = Producer(self.producer_conf)
-        self.consumer.subscribe(self.subs.keys())
-
+        self.logger.debug('Initialising clients')
+        self.consumer = Consumer(self.consumer_config)
+        self.producer = Producer(self.producer_config)
+        topics = list(self.subs.keys())
+        self.logger.debug(f'Subscribing to topics: {topics}')
+        self.consumer.subscribe(topics)
 
     def run(self):
         """
         Main loop. Should never exit.
         """
+        self.logger.debug('Run loop started')
         self._initialise_clients()
         while True:
+            self.logger.debug('Iteration started')
             try:
-                self.logger.info('Checking for new messages')
                 msgs = self._consume()
                 for msg in msgs:
                     t0 = time.perf_counter()
+                    self.logger.debug('Processing message')
                     if msg.error() is not None:
+                        self.logger.debug(f'Message has an error: {msg.error()}')
                         if msg.error().code() == KafkaError._PARTITION_EOF:
-                            logger.info(
+                            self.logger.info(
                                 f' {msg.topic()}[{msg.partition()}] reached end \
-                                of offset {msg.offset()}')
+                                of offset {msg.offset()}'
+                            )
+                            continue
                         else:
-                            logger.error(f' Fatal error: {msg.error()}')
                             self.consumer.commit(msg)
                             raise KafkaException(msg.error())
                     else:
-                        try:
-                            for result, publish_to in self._process_message(msg):
-                                if publish_to is not None:
-                                    self._produce(result, publish_to=publish_to)
-                                else:
-                                    logger.info(f'No producer set')
-                            t1 = time.perf_counter()
-                            for callback in self.on_processed_callbacks:
-                                callback(msg, t1 - t0)
-                        except JSONDecodeError as error:
-                            # Non-retriable error
-                            logger.error(error)
-                            for callback in self.on_failed_callbacks:
-                                callback(msg, inner_error)
-                        finally:
-                            self.consumer.commit(msg)
+                        self.logger.debug('Message has no error')
+                        # User code
+                        process_output = self._process_message(msg)
+                        t1 = time.perf_counter()
+                        # TODO: make callbacks suppress exceptions
+                        for callback in self.on_processed_callbacks:
+                            callback(msg, t1 - t0)
+
+                        # Publish results
+                        to_publish = [
+                            (result, publish_to) for
+                            result, publish_to in process_output
+                            if publish_to is not None
+                        ]
+                        for result, publish_to in to_publish:
+                            self._produce(result, publish_to=publish_to)
+
+                        self.logger.debug('Commiting message')
+                        self.consumer.commit(msg)
             except(BufferError):
                 self.logger.info('Sleeping for 10 seconds.')
                 time.sleep(10)
             except Exception as error:
+                # TODO: make callbacks suppress exceptions
+                for callback in self.on_failed_callbacks:
+                    callback(msg, error)
                 self.logger.error(error)
                 self.logger.info('Re-initialising clients')
                 self._initialise_clients()
                 self.logger.info('Sleeping for 5 seconds.')
                 time.sleep(10)
+            self.logger.debug('Iteration ended')
 
-    def _coalesce_result(self, result):
-        if result is None:
-            return result
-        if isinstance(result, Result):
-            return result
-        return Result(value=result)
 
     def _process_message(self, msg):
-        msg_error = msg.error()
-        if msg_error is None:
-            # Process single message
-            subs = self._get_subs(msg.topic)
-            for func, publish_to in subs:
-                value_dict = json.loads(msg.value())
-                for result in func(value_dict):
-                    result = self._coalesce_result(result)
-                    yield result, publish_to
-        elif msg_error == KafkaError._PARTITION_EOF:
-            # Log the EOF, but don't process the message further
-            self.logger.info(f'{msg.topic()}[{msg.partition()}] reached end of offset {msg.offset()}')
-        else:
-            raise Exception(msg_error)
+        # Process single message
+        topic = msg.topic()
+        subs = self._get_subs(topic)
+        self.logger.debug(f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
+        for func, publish_to in subs:
+            for result in func(msg):
+                self.logger.debug(f'User function "{func.__name__}" produced a result')
+                yield result, publish_to
 
     def _get_subs(self, topic):
         return self.subs.get(topic) or []
 
 
+    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=5000)
     def _consume(self):
+        self.logger.debug(f'Consuming messages...')
         msgs = self.consumer.consume(
             num_messages=self.consumer_batch_size,
             timeout=self.consumer_timeout
@@ -119,17 +133,21 @@ class KafkaApp:
             minutes = self.consumer_timeout/60
             self.logger.info(f'Nothing received for {minutes} minutes.')
         else:
-            self.logger.info(f'Read {len(msgs)} new messages')
+            self.logger.info(f'Consumed {len(msgs)} new messages from Kafka')
+            for msg in msgs:
+                self.logger.info(f'Message consumed: {msg.value()}')
         return msgs
 
 
-    def _produce(self, message, publish_to):
+    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=10000)
+    def _produce(self, result, publish_to):
+        key = str(result.key or random.random()).encode('utf-8')
         self.producer.produce(
             topic=publish_to,
-            key=message.key,
-            value=json.dumps(message.value).encode('utf-8')
+            key=key,
+            value=result.value
         )
-        logger.info(f'Message produced: {json.dumps(message.as_dict())}')
+        self.logger.info(f'Message produced: {result.value}')
         self.producer.poll(0)
 
 

@@ -16,7 +16,8 @@ setuptools.setup(
      url="https://github.com/skipperkongen/kaf",
      packages=['kaf'],
      install_requires=[
-        'confluent_kafka'
+        'confluent_kafka',
+        'retrying'
      ],
      classifiers=[
          "Programming Language :: Python :: 3",
