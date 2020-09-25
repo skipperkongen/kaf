@@ -31,9 +31,9 @@ class KafkaApp:
         self.consumer_batch_size = consumer_batch_size
         self.consumer_timeout = consumer_timeout
         self.on_processed_callbacks = []
-        self.on_failed_callbacks = []
-        #self.consumer = Consumer(consumer_config)
-        #self.producer = Producer(producer_config)
+        # self.on_failed_callbacks = []
+        # self.consumer = Consumer(consumer_config)
+        # self.producer = Producer(producer_config)
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
@@ -78,33 +78,34 @@ class KafkaApp:
                         # User code
                         process_output = self._process_message(msg)
                         t1 = time.perf_counter()
-                        # TODO: make callbacks suppress exceptions
-                        for callback in self.on_processed_callbacks:
-                            callback(msg, t1 - t0)
-
-                        # Publish results
                         to_publish = [
                             (result, publish_to) for
                             result, publish_to in process_output
                             if publish_to is not None
                         ]
+                        # TODO: make callbacks suppress exceptions
+                        for callback in self.on_processed_callbacks:
+                            callback(msg, t1 - t0)
+
+                        # Publish results
                         for result, publish_to in to_publish:
                             self._produce(result, publish_to=publish_to)
 
-                        self.logger.debug('Commiting message')
+                        self.logger.info(f'Commiting message: {msg.value()}')
                         self.consumer.commit(msg)
-            except(BufferError):
+            except BufferError as error:
+                self.error(error)
                 self.logger.info('Sleeping for 10 seconds.')
                 time.sleep(10)
             except Exception as error:
                 # TODO: make callbacks suppress exceptions
-                for callback in self.on_failed_callbacks:
-                    callback(msg, error)
+                # for callback in self.on_failed_callbacks:
+                #     callback(msg, error)
                 self.logger.error(error)
                 self.logger.info('Re-initialising clients')
                 self._initialise_clients()
-                self.logger.info('Sleeping for 5 seconds.')
-                time.sleep(10)
+                self.logger.info('Sleeping for 3 seconds.')
+                time.sleep(3)
             self.logger.debug('Iteration ended')
 
 
@@ -167,6 +168,6 @@ class KafkaApp:
         return func
 
 
-    def on_failed(self, func):
-        self.on_failed_callbacks.append(func)
-        return func
+    # def on_failed(self, func):
+    #     self.on_failed_callbacks.append(func)
+    #     return func

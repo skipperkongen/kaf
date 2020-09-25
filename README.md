@@ -13,37 +13,93 @@ The framework depends on Confluent Kafka.
 
 ## How to use
 
-Hello world:
+Minimal example:
 
 ```python
 import logging
 
 from kaf import KafkaApp, Result
 
-consumer_conf = {'bootstrap.servers': 'kafka:9092', 'group.id': 'myapp'}
-producer_conf = {'bootstrap.servers': 'kafka:9092'}
+consumer_config = {'bootstrap.servers': 'kafka:9092', 'group.id': 'myapp'}
+producer_config = {'bootstrap.servers': 'kafka:9092'}
 
-app = KafkaApp('myapp', consumer_conf, producer_conf)
-counter_ok = 0
-counter_failed = 0
-
+app = KafkaApp(
+    'myapp',
+    consumer_config=consumer_config,
+    producer_config=producer_config
+)
 app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
-def uppercase_everything(msg):
-  value = {key:str(val).upper() for key, val in msg.items()}
-  yield Result(key='mykey', value=value)
+def hello(msg):
+    yield Result('hello'.encode('utf-8'), key="world")
 
 @app.on_processed
-def inc_ok(msg, seconds_elapsed):
-    counter_ok += 1
-
-@app.on_failed
-def inc_failed(msg, error):
-    counter_failed += 1
+def done(msg, seconds_elapsed):
+    app.logger.info('Processed one message')
 
 if __name__ == '__main__':
   app.run()
+```
+
+The merry-go-round:
+
+```python
+import datetime
+import json
+import logging
+import random
+import time
+import uuid
+import yaml
+
+from kaf import KafkaApp, Result
+
+with open('config.yaml.local', "r") as stream:
+    config = yaml.safe_load(stream)
+
+
+app = KafkaApp(
+    'myapp',
+    consumer_config=config['KafkaConsumer'],
+    producer_config=config['KafkaProducer'],
+    consumer_timeout=5
+)
+
+app.logger.setLevel(logging.INFO)
+
+def make_value(old_counter=None):
+    value = {
+        'id': str(uuid.uuid4()),
+        'created_at': datetime.datetime.utcnow().isoformat()
+    }
+    if old_counter is None:
+        value['counter'] = 0
+    else:
+        value['counter'] = old_counter + 1
+    return value
+
+@app.process(topic='test', publish_to='test')
+def process(msg):
+    if random.random() < 0.25:
+        raise Exception('Random error occured while processing [USER CODE]')
+    incoming_value = json.loads(msg.value())
+    outgoing_value = make_value(incoming_value['counter'])
+    app.logger.info(f'Processing message [USER CODE] ')
+    time.sleep(1)
+    yield Result(json.dumps(outgoing_value).encode('utf-8'))
+
+@app.on_processed
+def on_processed(msg, seconds_elapsed):
+    app.logger.info(f'Processing completed in {seconds_elapsed} seconds [USER CODE]')
+
+if __name__ == '__main__':
+    # Start the merry-go-round
+    app._initialise_clients()
+    first_result = Result(value=json.dumps(make_value()).encode('utf-8'))
+    app._produce(result=first_result, publish_to='test')
+    app.producer.flush()
+    app.run()
 ```
 
 ## How errors are handled
