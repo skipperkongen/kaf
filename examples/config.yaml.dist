@@ -1,0 +1,27 @@
+KafkaConsumer:
+  bootstrap.servers: "xxxx.servicebus.windows.net:9093"
+  security.protocol: "SASL_SSL"
+  sasl.mechanism: "PLAIN"
+  sasl.username: "$ConnectionString"
+  client.id: "merry_go_round"
+  request.timeout.ms: 60000
+  session.timeout.ms: 60000
+  default.topic.config: { "auto.offset.reset": "smallest" }
+  group.id: 'try-kaf'
+  sasl.password: "Endpoint=sb://xxxx.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=xxxxxxx"
+KafkaProducer:
+  bootstrap.servers: "xxxx.servicebus.windows.net:9093"
+  security.protocol: "SASL_SSL"
+  sasl.mechanism: "PLAIN"
+  sasl.username: "$ConnectionString"
+  api.version.request: "true"
+  client.id: "merry_go_round"
+  socket.keepalive.enable: "true"
+  metadata.max.age.ms: 180000
+  enable.idempotence: "false"
+  compression.codec: "none"
+  linger.ms: 10
+  request.timeout.ms: 50000
+  delivery.timeout.ms: 250050
+  retries: 5
+  sasl.password: "Endpoint=sb://xxxx.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=xxxxxxx"

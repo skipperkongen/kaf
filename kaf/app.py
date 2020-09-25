@@ -1,5 +1,6 @@
 import dataclasses as dc
 import functools
+import hashlib
 import json
 import logging
 import random
@@ -60,6 +61,8 @@ class KafkaApp:
             try:
                 msgs = self._consume()
                 for msg in msgs:
+                    msg_hash = hashlib.sha256(msg.value()).hexdigest()
+                    self.logger.info(f'Message [{msg_hash}] received: {msg.value()}')
                     t0 = time.perf_counter()
                     self.logger.debug('Processing message')
                     if msg.error() is not None:
@@ -83,6 +86,10 @@ class KafkaApp:
                             result, publish_to in process_output
                             if publish_to is not None
                         ]
+                        # assert that values are serialized
+                        for result, _ in to_publish:
+                            assert(isinstance(result.value, bytes))
+                        self.logger.info(f'Message [{msg_hash}] processed')
                         # TODO: make callbacks suppress exceptions
                         for callback in self.on_processed_callbacks:
                             callback(msg, t1 - t0)
@@ -90,9 +97,8 @@ class KafkaApp:
                         # Publish results
                         for result, publish_to in to_publish:
                             self._produce(result, publish_to=publish_to)
-
-                        self.logger.info(f'Commiting message: {msg.value()}')
                         self.consumer.commit(msg)
+                        self.logger.info(f'Message [{msg_hash}] committed')
             except BufferError as error:
                 self.error(error)
                 self.logger.info('Sleeping for 10 seconds.')
@@ -123,7 +129,6 @@ class KafkaApp:
         return self.subs.get(topic) or []
 
 
-    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=5000)
     def _consume(self):
         self.logger.debug(f'Consuming messages...')
         msgs = self.consumer.consume(
@@ -135,12 +140,10 @@ class KafkaApp:
             self.logger.info(f'Nothing received for {minutes} minutes.')
         else:
             self.logger.info(f'Consumed {len(msgs)} new messages from Kafka')
-            for msg in msgs:
-                self.logger.info(f'Message consumed: {msg.value()}')
         return msgs
 
 
-    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=10000)
+    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=5000, stop_max_attempt_number=10)
     def _produce(self, result, publish_to):
         key = str(result.key or random.random()).encode('utf-8')
         self.producer.produce(
@@ -148,9 +151,9 @@ class KafkaApp:
             key=key,
             value=result.value
         )
-        self.logger.info(f'Message produced: {result.value}')
+        msg_hash = hashlib.sha256(result.value).hexdigest()
+        self.logger.info(f'Message [{msg_hash}] produced: {result.value}')
         self.producer.poll(0)
-
 
     def process(self, topic, publish_to=None):
         """
