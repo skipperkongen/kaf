@@ -7,7 +7,6 @@ Kaf is a small Python framework for creating Kafka apps. It is inspired by Faust
 - Kaf is synchronous (async is future work)
 - Kaf is compatible with Azure Eventhubs (over Kafka interface)
 - Kaf is designed to work with different brokers for the consumer and producer
-- Kaf expects JSON events
 
 The framework depends on Confluent Kafka.
 
