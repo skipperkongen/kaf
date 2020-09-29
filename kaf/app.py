@@ -13,13 +13,6 @@ from retrying import retry
 
 logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
 
-
-@dc.dataclass(unsafe_hash=True)
-class Result:
-    value: dict
-    key: object = None
-
-
 class KafkaApp:
 
     def __init__(self, name, consumer_config, producer_config, consumer_batch_size=1, consumer_timeout=60):
@@ -37,83 +30,170 @@ class KafkaApp:
         # self.producer = Producer(producer_config)
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
+        self.running = False
 
     def exit_gracefully(self, signum, frame):
         self.producer.flush()
+        self.running = False
+        self.logger.info('Exiting gracefully')
         sys.exit()
 
+    @retry(wait_fixed=5000)
     def _initialise_clients(self):
-        self.logger.debug('Initialising clients')
-        self.consumer = Consumer(self.consumer_config)
-        self.producer = Producer(self.producer_config)
-        topics = list(self.subs.keys())
-        self.logger.debug(f'Subscribing to topics: {topics}')
-        self.consumer.subscribe(topics)
+        """
+        Try to initialise until successful
+        """
+        try:
+            self.logger.info('Initialising clients')
+            self.consumer = Consumer(self.consumer_config)
+            self.producer = Producer(self.producer_config)
+            topics = list(self.subs.keys())
+            self.logger.debug(f'Subscribing to topics: {topics}')
+            self.consumer.subscribe(topics)
+        except Exception as e:
+            self.logger.error(e)
+            raise e
+
+
+    @retry(wait_fixed=5000)
+    def _consume_messages(self):
+        """
+        Try to consume until successful
+        """
+        try:
+            self.logger.info('Consuming message')
+            msgs = self.consumer.consume(
+                num_messages=self.consumer_batch_size,
+                timeout=self.consumer_timeout
+            )
+            return msgs
+        except Exception as e:
+            self.logger.error(e)
+            raise e
+
+    @retry(wait_fixed=5000)
+    def _produce_message(self, key, value, publish_to):
+        """
+        Try to produce until successful
+        """
+        try:
+            self.logger.debug(f'Producing message: KEY={key}, VALUE={value}')
+            self.logger.info(f'Producing message')
+            self.producer.produce(
+                key=key,
+                value=value,
+                topic=publish_to
+            )
+            self.producer.poll(0)
+        except Exception as e:
+            self.logger.error(e)
+            raise e
+
+    @retry(wait_fixed=5000)
+    def _commit_message(self, msg):
+        """
+        Try to commit until successful
+        """
+        try:
+            self.consumer.commit(msg)
+        except Exception as e:
+            self.logger.error(e)
+            raise e
 
     def run(self):
         """
         Main loop. Should never exit.
+
+        Pseudo-code:
+
+            inputs = consume()
+            for input in inputs:
+                outputs = process(input)
+                for output in outputs:
+                    produce(output)
+                commit(input)
+
         """
         self.logger.debug('Run loop started')
+        # Try to initialise clients until successful
         self._initialise_clients()
-        while True:
+
+        # Loop forever
+        self.running = True
+        while self.running:
+            iter_t0 = time.perf_counter()
             self.logger.debug('Iteration started')
-            try:
-                msgs = self._consume()
-                for msg in msgs:
-                    msg_hash = hashlib.sha256(msg.value()).hexdigest()
-                    self.logger.info(f'Message [{msg_hash}] received: {msg.value()}')
-                    t0 = time.perf_counter()
-                    self.logger.debug('Processing message')
-                    if msg.error() is not None:
-                        self.logger.debug(f'Message has an error: {msg.error()}')
-                        if msg.error().code() == KafkaError._PARTITION_EOF:
-                            self.logger.info(
-                                f' {msg.topic()}[{msg.partition()}] reached end \
-                                of offset {msg.offset()}'
-                            )
-                            continue
+
+            # Try to consume messages until successful
+            msgs = self._consume_messages()
+            if len(msgs) == 0:
+                self.logger.info(f'No messages consumed for {self.consumer_timeout} seconds')
+            else:
+                self.logger.info(f'Consumed {len(msgs)} message(s)')
+            for msg in msgs:
+                # Case 1a: msg has retriable error => don't commit
+                # Case 1b: msg has fatal error => commit
+                # Case 2: msg was processed successfully => commit
+                # Case 3: msg processing failed => don't commit
+
+                    # Completely process each message before continuing to next
+                    try:
+                        t0 = time.perf_counter()
+                        commit = False
+                        sha256_value = self._get_sha256_hash(msg.value())
+                        self.logger.info(f'Processing message; SHA256_VALUE={sha256_value}')
+                        self.logger.debug(f'Processing message; VALUE={msg.value()}')
+
+                        if msg.error() is not None:
+                            # Case 1a / 1b
+                            commit = not error.retriable()
+                            if msg.error().code() == KafkaError._PARTITION_EOF:
+                                self.logger.info(
+                                    f' {msg.topic()}[{msg.partition()}] reached end \
+                                    of offset {msg.offset()}'
+                                )
+                            else:
+                                self.logger.error(msg.error())
+
                         else:
-                            self.consumer.commit(msg)
-                            raise KafkaException(msg.error())
-                    else:
-                        self.logger.debug('Message has no error')
-                        # User code
-                        process_output = self._process_message(msg)
-                        t1 = time.perf_counter()
-                        to_publish = [
-                            (result, publish_to) for
-                            result, publish_to in process_output
-                            if publish_to is not None
-                        ]
-                        # assert that values are serialized
-                        for result, _ in to_publish:
-                            assert(isinstance(result.value, bytes))
-                        self.logger.info(f'Message [{msg_hash}] processed')
-                        # TODO: make callbacks suppress exceptions
-                        for callback in self.on_processed_callbacks:
-                            callback(msg, t1 - t0)
+                            #
+                            process_output = self._process_message(msg)
+                            # Publish results
+                            for i, (key, value, publish_to) in enumerate(process_output):
+                                sha256_prod = self._get_sha256_hash(value)
+                                self._produce_message(
+                                    key=key,
+                                    value=value,
+                                    publish_to=publish_to
+                                )
+                                self.logger.info(f'Produced message[{i+1}]; SHA256_VALUE={sha256_prod}')
+                            self.logger.info(f'Processed message; SHA256_VALUE={sha256_prod}')
+                            # We don't care if callback raises an Exception
+                            t1 = time.perf_counter()
+                            commit = True
+                            for callback in self.on_processed_callbacks:
+                                callback(msg, t1 - t0)
+                    except KafkaException as e:
+                        kafka_error = e.args[0]
+                        commit = not kafka_error.retriable()
+                        self.logger.error(e)
+                    except Exception as e:
+                        self.logger.error(e)
+                    finally:
+                        if commit:
+                            self._commit_message(msg)
+                            self.logger.info(f'Committed message; SHA256_VALUE={sha256_value}')
+                        else:
+                            self.logger.info(f'Did not commit message; SHA256_VALUE={sha256_value}')
 
-                        # Publish results
-                        for result, publish_to in to_publish:
-                            self._produce(result, publish_to=publish_to)
-                        self.consumer.commit(msg)
-                        self.logger.info(f'Message [{msg_hash}] committed')
-            except BufferError as error:
-                self.error(error)
-                self.logger.info('Sleeping for 10 seconds.')
-                time.sleep(10)
-            except Exception as error:
-                # TODO: make callbacks suppress exceptions
-                # for callback in self.on_failed_callbacks:
-                #     callback(msg, error)
-                self.logger.error(error)
-                self.logger.info('Re-initialising clients')
-                self._initialise_clients()
-                self.logger.info('Sleeping for 3 seconds.')
-                time.sleep(3)
-            self.logger.debug('Iteration ended')
+            iter_t1 = time.perf_counter()
+            self.logger.debug(f'Iteration completed in {iter_t1 - iter_t0} seconds')
 
+    def _get_sha256_hash(self, value):
+        if value is not None:
+            return hashlib.sha256(value).hexdigest()
+        else:
+            return '-'
 
     def _process_message(self, msg):
         # Process single message
@@ -121,43 +201,28 @@ class KafkaApp:
         subs = self._get_subs(topic)
         self.logger.debug(f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
         for func, publish_to in subs:
-            for result in func(msg):
-                self.logger.debug(f'User function "{func.__name__}" produced a result')
-                yield result, publish_to
+            self.logger.info(f'Calling user function "{func.__name__}"')
+            for key, value in func(msg):
+                if publish_to is None: continue
+                key = self._bytify(key or random.random())
+                value = self._bytify(value)
+                yield key, value, publish_to
+
+    def _bytify(self, x):
+        if type(x) == dict:
+            return json.dumps(x).encode('utf-8')
+        try:
+            return bytes(x)
+        except:
+            return str(x).encode('utf-8')
 
     def _get_subs(self, topic):
         return self.subs.get(topic) or []
 
 
-    def _consume(self):
-        self.logger.debug(f'Consuming messages...')
-        msgs = self.consumer.consume(
-            num_messages=self.consumer_batch_size,
-            timeout=self.consumer_timeout
-        )
-        if len(msgs) == 0:
-            minutes = self.consumer_timeout/60
-            self.logger.info(f'Nothing received for {minutes} minutes.')
-        else:
-            self.logger.info(f'Consumed {len(msgs)} new messages from Kafka')
-        return msgs
-
-
-    @retry(retry_on_exception=(KafkaException, BufferError), wait_fixed=5000, stop_max_attempt_number=10)
-    def _produce(self, result, publish_to):
-        key = str(result.key or random.random()).encode('utf-8')
-        self.producer.produce(
-            topic=publish_to,
-            key=key,
-            value=result.value
-        )
-        msg_hash = hashlib.sha256(result.value).hexdigest()
-        self.logger.info(f'Message [{msg_hash}] produced: {result.value}')
-        self.producer.poll(0)
-
     def process(self, topic, publish_to=None):
         """
-        Use to decorate functions that process single events
+        Decorator for user functions that process single events
         """
         def process_decorator(func):
             sub = (func, publish_to)
@@ -167,6 +232,9 @@ class KafkaApp:
 
 
     def on_processed(self, func):
+        """
+        Decorator for user callbacks
+        """
         self.on_processed_callbacks.append(func)
         return func
 

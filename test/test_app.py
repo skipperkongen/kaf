@@ -24,25 +24,15 @@ class TestKafkaApp(unittest.TestCase):
             'testapp',
             consumer_config={'bootstrap.servers': 'kafka:9092', 'group.id': '0'},
             producer_config={'bootstrap.servers': 'kafka:9092'})
-        self.counter_ok = 0
-        self.counter_failed = 0
 
         @self.app.process(topic='foo', publish_to='bar')
         def process(msg):
-            message = msg.get('message') or '-'
-            return {'x': 42, 'y': message.upper()}
+            yield 'foo', {'x': 42}
 
-        @self.app.process(topic='foo2')
-        def process(msg):
-            return {}
 
         @self.app.on_processed
         def inc_ok(msg, seconds_elapsed):
-            self.counter_ok += 1
-
-        @self.app.on_failed
-        def inc_failed(msg, error):
-            self.counter_failed += 1
+            print('OK')
 
 
     def test_1(self):
@@ -57,10 +47,10 @@ class TestKafkaApp(unittest.TestCase):
         subs = self.app._get_subs('foo')
         for func, publish_to in subs:
             input = {'message': 'foo'}
-            output = func(input)
             self.assertTrue(callable(func))
-            self.assertTrue(type(output) == dict)
-            self.assertTrue(output['y'] == input['message'].upper())
+            for key, value in func(input):
+                self.assertTrue(type(key) == str)
+                self.assertTrue(type(value) == dict)
 
     def test_4(self):
         def fff():

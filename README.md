@@ -17,7 +17,7 @@ Minimal example:
 ```python
 import logging
 
-from kaf import KafkaApp, Result
+from kaf import KafkaApp
 
 consumer_config = {'bootstrap.servers': 'kafka:9092', 'group.id': 'myapp'}
 producer_config = {'bootstrap.servers': 'kafka:9092'}
@@ -25,86 +25,27 @@ producer_config = {'bootstrap.servers': 'kafka:9092'}
 app = KafkaApp(
     'myapp',
     consumer_config=consumer_config,
-    producer_config=producer_config
+    producer_config=producer_config,
+    consumer_timeout=5,
+    consumer_batch_size=1    
 )
 app.logger.setLevel(logging.INFO)
 
 @app.process(topic='foo', publish_to='bar')
 def hello(msg):
-    yield Result('hello'.encode('utf-8'), key="world")
+    yield 'key', {'hello':  'world'}
 
 @app.on_processed
 def done(msg, seconds_elapsed):
-    app.logger.info('Processed one message')
+    app.logger.info(f'Processed message in {seconds_elapsed} seconds')
 
 if __name__ == '__main__':
   app.run()
 ```
 
-The merry-go-round:
-
-```python
-import datetime
-import json
-import logging
-import random
-import time
-import uuid
-import yaml
-
-from kaf import KafkaApp, Result
-
-with open('config.yaml.local', "r") as stream:
-    config = yaml.safe_load(stream)
-
-
-app = KafkaApp(
-    'myapp',
-    consumer_config=config['KafkaConsumer'],
-    producer_config=config['KafkaProducer'],
-    consumer_timeout=5
-)
-
-app.logger.setLevel(logging.INFO)
-
-def make_value(old_counter=None):
-    value = {
-        'id': str(uuid.uuid4()),
-        'created_at': datetime.datetime.utcnow().isoformat()
-    }
-    if old_counter is None:
-        value['counter'] = 0
-    else:
-        value['counter'] = old_counter + 1
-    return value
-
-@app.process(topic='test', publish_to='test')
-def process(msg):
-    if random.random() < 0.25:
-        raise Exception('Random error occured while processing [USER CODE]')
-    incoming_value = json.loads(msg.value())
-    outgoing_value = make_value(incoming_value['counter'])
-    app.logger.info(f'Processing message [USER CODE] ')
-    time.sleep(1)
-    yield Result(json.dumps(outgoing_value).encode('utf-8'))
-
-@app.on_processed
-def on_processed(msg, seconds_elapsed):
-    app.logger.info(f'Processing completed in {seconds_elapsed} seconds [USER CODE]')
-
-if __name__ == '__main__':
-    # Start the merry-go-round
-    app._initialise_clients()
-    first_result = Result(value=json.dumps(make_value()).encode('utf-8'))
-    app._produce(result=first_result, publish_to='test')
-    app.producer.flush()
-    app.run()
-```
-
 ## How errors are handled
 
-In case of an unhandled error, the framework will reinitialise the consumer and producer
-and wait for 3 seconds.
+Kafka functions keep trying until they succeed. If the user function throws an exception, the
 
 ## Future work:
 
@@ -116,11 +57,9 @@ Features to be added:
 
 Steps (can maybe be improved):
 
-1. change version in setup.py
+1. change version and download_url in setup.py
 1. git add + commit + push
-1. create new release in GitHub (copy link)
-1. update download_url in setup.py
-1. git add + commit + push (again)
+1. create new release in GitHub (check source-code link, should match download_url)
 1. Run `python setup.py sdist`
 1. Run `twine upload dist/* --verbose` (if not installed, `pip install twine` first)
 

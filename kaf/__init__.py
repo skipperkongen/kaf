@@ -1,1 +1,1 @@
-from kaf.app import KafkaApp, Result
+from kaf.app import KafkaApp
