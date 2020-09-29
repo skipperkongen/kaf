@@ -167,7 +167,7 @@ class KafkaApp:
                                     publish_to=publish_to
                                 )
                                 self.logger.info(f'Produced message[{i+1}]; SHA256_VALUE={sha256_prod}')
-                            self.logger.info(f'Processed message; SHA256_VALUE={sha256_prod}')
+                            self.logger.info(f'Processed message; SHA256_VALUE={sha256_value}')
                             # We don't care if callback raises an Exception
                             t1 = time.perf_counter()
                             commit = True
