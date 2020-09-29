@@ -45,7 +45,7 @@ if __name__ == '__main__':
 
 ## How errors are handled
 
-Kafka functions keep trying until they succeed. If the user function throws an exception, the
+Kafka functions keep trying until they succeed. If the user function throws an exception, kaf will continue to the next message but not commit the message that failed.
 
 ## Future work:
 
