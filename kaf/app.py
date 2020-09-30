@@ -67,9 +67,11 @@ class KafkaApp:
                 timeout=self.consumer_timeout
             )
             return msgs
-        except Exception as e:
-            self.logger.error(e)
-            raise e
+        except KafkaException as e:
+            kafka_error = e.args[0]
+            self.logger.error(kafka_error)
+            if kafka_error.retriable(): raise e
+
 
     @retry(wait_fixed=5000)
     def _produce_message(self, key, value, publish_to):
@@ -85,9 +87,11 @@ class KafkaApp:
                 topic=publish_to
             )
             self.producer.poll(0)
-        except Exception as e:
-            self.logger.error(e)
-            raise e
+        except KafkaException as e:
+            kafka_error = e.args[0]
+            self.logger.error(kafka_error)
+            if kafka_error.retriable(): raise e
+
 
     @retry(wait_fixed=5000)
     def _commit_message(self, msg):
@@ -96,9 +100,10 @@ class KafkaApp:
         """
         try:
             self.consumer.commit(msg)
-        except Exception as e:
-            self.logger.error(e)
-            raise e
+        except KafkaException as e:
+            kafka_error = e.args[0]
+            self.logger.error(kafka_error)
+            if kafka_error.retriable(): raise e
 
     def run(self):
         """
