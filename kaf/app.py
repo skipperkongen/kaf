@@ -58,7 +58,7 @@ class KafkaApp:
     @retry(wait_fixed=5000)
     def _consume_messages(self):
         """
-        Try to consume until successful
+        Try to consume until successful (unless error is fatal)
         """
         try:
             self.logger.info('Consuming message')
@@ -70,13 +70,13 @@ class KafkaApp:
         except KafkaException as e:
             kafka_error = e.args[0]
             self.logger.error(kafka_error)
-            if kafka_error.retriable(): raise e
+            if not kafka_error.fatal(): raise e
 
 
     @retry(wait_fixed=5000)
     def _produce_message(self, key, value, publish_to):
         """
-        Try to produce until successful
+        Try to produce until successful (unless error is fatal)
         """
         try:
             self.logger.debug(f'Producing message: KEY={key}, VALUE={value}')
@@ -90,24 +90,24 @@ class KafkaApp:
         except KafkaException as e:
             kafka_error = e.args[0]
             self.logger.error(kafka_error)
-            if kafka_error.retriable(): raise e
+            if not kafka_error.fatal(): raise e
 
 
     @retry(wait_fixed=5000)
     def _commit_message(self, msg):
         """
-        Try to commit until successful
+        Try to commit until successful (unless error is fatal)
         """
         try:
             self.consumer.commit(msg)
         except KafkaException as e:
             kafka_error = e.args[0]
             self.logger.error(kafka_error)
-            if kafka_error.retriable(): raise e
+            if not kafka_error.fatal(): raise e
 
     def run(self):
         """
-        Main loop. Should never exit.
+        Main loop of kaf. Should never exit.
 
         Pseudo-code:
 
@@ -164,7 +164,7 @@ class KafkaApp:
                             #
                             process_output = self._process_message(msg)
                             # Publish results
-                            for i, (key, value, publish_to) in enumerate(process_output):
+                            for i, (value, key, publish_to) in enumerate(process_output):
                                 sha256_prod = self._get_sha256_hash(value)
                                 self._produce_message(
                                     key=key,
@@ -195,42 +195,83 @@ class KafkaApp:
             self.logger.debug(f'Iteration completed in {iter_t1 - iter_t0} seconds')
 
     def _get_sha256_hash(self, value):
+        """
+        Returns the SHA256 hash of the input value (if not None), otherwise returns '-'.
+        """
         if value is not None:
             return hashlib.sha256(value).hexdigest()
         else:
             return '-'
 
     def _process_message(self, msg):
-        # Process single message
+        """
+        Process a single message
+        """
         topic = msg.topic()
         subs = self._get_subs(topic)
+        input_bytes = msg.value()
         self.logger.debug(f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
-        for func, publish_to in subs:
+        for func, publish_to, accepts, returns in subs:
             self.logger.info(f'Calling user function "{func.__name__}"')
-            for key, value in func(msg):
+            input_obj = self._parse(input_bytes, accepts)
+            for output_obj, key in func(input_obj):
                 if publish_to is None: continue
-                key = self._bytify(key or random.random())
-                value = self._bytify(value)
-                yield key, value, publish_to
+                key = self._keyify(key)
+                output_bytes = self._serialize(output_obj, returns)
+                yield output_bytes, key, publish_to
 
-    def _bytify(self, x):
-        if type(x) == dict:
-            return json.dumps(x).encode('utf-8')
-        try:
-            return bytes(x)
-        except:
-            return str(x).encode('utf-8')
+    def _parse(self, input_bytes, accepts):
+        if accepts == 'bytes':
+            return input_bytes
+        elif accepts == 'json':
+            return json.loads(input_bytes)
+        else:
+            raise TypeError(f'Unsupported value for accepts parameter: {accepts}')
+
+    def _keyify(self, key):
+        if key is None:
+            return key
+        else:
+            return bytes(key)
+
+    def _serialize(self, output_obj, returns):
+        """
+        Serialize an output from a user function, i.e. turn it into bytes.
+        """
+        if returns == 'bytes':
+            # Assert that already serialized
+            if type(output_obj) != bytes:
+                raise TypeError(f'User function should return bytes, but returned {type(output_obj)}')
+            return output_obj
+        elif returns == 'json':
+            try:
+                return json.dumps(output_obj).encode('utf-8')
+            except:
+                raise TypeError(f'User function returned value that can not be serialized to JSON: {output_obj}')
+        else:
+            raise TypeError(f'User function returned unsupported type: {type(output_obj)}')
 
     def _get_subs(self, topic):
+        """
+        Returns a list of user functions subscriptions on a a topic.
+        """
         return self.subs.get(topic) or []
 
 
-    def process(self, topic, publish_to=None):
+    def process(self, topic, publish_to=None, accepts='bytes', returns='bytes'):
         """
-        Decorator for user functions that process single events
+        Decorator for user functions that processes a single event. The value
+        of the event is passed to the user function.
+        - The accepts parameter can be set to 'bytes' or 'json'
+        - The returns parameter can be set to 'bytes' or 'json'
+        The user function should return results as `yield value, key`, where
+        the type of value depends on the returns parameter (either raw bytes or something that can
+        be passed to json.dumps). The key should be either None or bytes.
         """
+        assert(accepts in ['bytes', 'json'])
+        assert(returns in ['bytes', 'json'])
         def process_decorator(func):
-            sub = (func, publish_to)
+            sub = (func, publish_to, accepts, returns)
             self.subs.setdefault(topic, []).append(sub)
             return func
         return process_decorator

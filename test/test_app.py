@@ -1,5 +1,8 @@
+import json
 import unittest
+
 from kaf import KafkaApp
+
 
 class Message:
     def __init__(self, topic, value, error, partition, offset):
@@ -25,9 +28,9 @@ class TestKafkaApp(unittest.TestCase):
             consumer_config={'bootstrap.servers': 'kafka:9092', 'group.id': '0'},
             producer_config={'bootstrap.servers': 'kafka:9092'})
 
-        @self.app.process(topic='foo', publish_to='bar')
-        def process(msg):
-            yield 'foo', {'x': 42}
+        @self.app.process(topic='foo', publish_to='bar', accepts='json', returns='json')
+        def process(input_value):
+            yield {'x': 42}, bytes(1)
 
 
         @self.app.on_processed
@@ -45,12 +48,12 @@ class TestKafkaApp(unittest.TestCase):
 
     def test_3(self):
         subs = self.app._get_subs('foo')
-        for func, publish_to in subs:
+        for func, publish_to, accepts, returns in subs:
             input = {'message': 'foo'}
             self.assertTrue(callable(func))
-            for key, value in func(input):
-                self.assertTrue(type(key) == str)
-                self.assertTrue(type(value) == dict)
+            for value, key in func(input):
+                self.assertTrue(type(key) == bytes)
+                self.assertTrue(json.dumps(value))
 
     def test_4(self):
         def fff():

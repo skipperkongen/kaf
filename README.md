@@ -31,9 +31,10 @@ app = KafkaApp(
 )
 app.logger.setLevel(logging.INFO)
 
-@app.process(topic='foo', publish_to='bar')
-def hello(msg):
-    yield 'key', {'hello':  'world'}
+@app.process(topic='foo', publish_to='bar', accepts='json', returns='json')
+def add_one(input):
+    number = input['number']
+    yield {'result':  number+1}, bytes(number)
 
 @app.on_processed
 def done(msg, seconds_elapsed):
