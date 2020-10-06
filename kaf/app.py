@@ -11,8 +11,6 @@ import time
 from confluent_kafka import Consumer, Producer, KafkaException, KafkaError
 from retrying import retry
 
-logging.basicConfig(format='[%(asctime)s] %(levelname)s %(message)s')
-
 class KafkaApp:
 
     def __init__(self, name, consumer_config, producer_config, consumer_batch_size=1, consumer_timeout=60):
