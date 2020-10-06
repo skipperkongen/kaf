@@ -9,7 +9,7 @@ setuptools.setup(
      download_url='https://github.com/skipperkongen/kaf/archive/v0.1.8.tar.gz',
      licence='MIT',
      author="Pimin Konstantin Kefaloukos",
-     author_email="skipperongen@gmail.com",
+     author_email="skipperkongen@gmail.com",
      description="A mini-framework for Kafka apps",
      long_description=long_description,
      long_description_content_type="text/markdown",
