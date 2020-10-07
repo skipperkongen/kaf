@@ -149,15 +149,14 @@ class KafkaApp:
 
                         if msg.error() is not None:
                             # Case 1a / 1b
-                            commit = not error.retriable()
-                            if msg.error().code() == KafkaError._PARTITION_EOF:
+                            commit = not msg.error().retriable()
+                            if error.code() == KafkaError._PARTITION_EOF:
                                 self.logger.info(
                                     f' {msg.topic()}[{msg.partition()}] reached end \
                                     of offset {msg.offset()}'
                                 )
                             else:
                                 self.logger.error(msg.error())
-
                         else:
                             #
                             process_output = self._process_message(msg)
@@ -179,15 +178,15 @@ class KafkaApp:
                     except KafkaException as e:
                         kafka_error = e.args[0]
                         commit = not kafka_error.retriable()
-                        self.logger.error(e)
+                        self.logger.exception(e)
                     except Exception as e:
-                        self.logger.error(e)
+                        self.logger.exception(e)
                     finally:
                         if commit:
                             self._commit_message(msg)
                             self.logger.info(f'Committed message; SHA256_VALUE={sha256_value}')
                         else:
-                            self.logger.info(f'Did not commit message; SHA256_VALUE={sha256_value}')
+                            self.logger.info(f'Will not commit message; SHA256_VALUE={sha256_value}')
 
             iter_t1 = time.perf_counter()
             self.logger.debug(f'Iteration completed in {iter_t1 - iter_t0} seconds')
