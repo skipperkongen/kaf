@@ -146,17 +146,18 @@ class KafkaApp:
                         sha256_value = self._get_sha256_hash(msg.value())
                         self.logger.info(f'Processing message; SHA256_VALUE={sha256_value}')
                         self.logger.debug(f'Processing message; VALUE={msg.value()}')
-
-                        if msg.error() is not None:
+                        
+                        error = msg.error()
+                        if error is not None:
                             # Case 1a / 1b
-                            commit = not msg.error().retriable()
+                            commit = not error.retriable()
                             if error.code() == KafkaError._PARTITION_EOF:
                                 self.logger.info(
                                     f' {msg.topic()}[{msg.partition()}] reached end \
                                     of offset {msg.offset()}'
                                 )
                             else:
-                                self.logger.error(msg.error())
+                                self.logger.error(error)
                         else:
                             #
                             process_output = self._process_message(msg)
