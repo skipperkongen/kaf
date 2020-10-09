@@ -5,8 +5,8 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
      name='kaf',
-     version='v0.1.10',
-     download_url='https://github.com/skipperkongen/kaf/archive/v0.1.10.tar.gz',
+     version='v0.2.0',
+     download_url='https://github.com/skipperkongen/kaf/archive/v0.2.0.tar.gz',
      licence='MIT',
      author="Pimin Konstantin Kefaloukos",
      author_email="skipperkongen@gmail.com",
