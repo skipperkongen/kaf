@@ -19,6 +19,7 @@ def retry_if_buffer_error_or_retriable(exception):
         isinstance(exception, BufferError)
     )
 
+
 class KafkaApp:
 
     def __init__(self, name, consumer_config, producer_config, consumer_batch_size=1, consumer_timeout=60):
@@ -31,9 +32,8 @@ class KafkaApp:
         self.consumer_batch_size = consumer_batch_size
         self.consumer_timeout = consumer_timeout
         self.on_processed_callbacks = []
-        self.on_failed_callbacks = []
-        # self.consumer = Consumer(consumer_config)
-        # self.producer = Producer(producer_config)
+        self.consumer = Consumer(consumer_config)
+        self.producer = Producer(producer_config)
         signal.signal(signal.SIGINT, self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
         self.running = False
@@ -50,8 +50,8 @@ class KafkaApp:
         Try to initialise until successful
         """
         self.logger.info('Trying to initialise clients...')
-        self.consumer = Consumer(self.consumer_config)
-        self.producer = Producer(self.producer_config)
+        #self.consumer = Consumer(self.consumer_config)
+        #self.producer = Producer(self.producer_config)
         topics = list(self.subs.keys())
         self.logger.debug(f'Subscribing to topics: {topics}')
         self.consumer.subscribe(topics)
@@ -139,7 +139,7 @@ class KafkaApp:
                             else:
                                 self.logger.error(error)
                         else:
-                            #
+                            # Call user functions
                             process_output = self._process_message(msg)
                             # Publish results
                             for j, (value, key, publish_to) in enumerate(process_output):
@@ -158,12 +158,7 @@ class KafkaApp:
                                 except Exception as e_inner:
                                     self.logger.exception(e)
                     except Exception as e:
-                        try:
-                            self.logger.exception(e)
-                            for callback in self.on_failed_callbacks:
-                                callback(msg, e)
-                        except Exception as e_inner:
-                            self.logger.exception(e)
+                        self.logger.exception(e)
                     finally:
                         try:
                             self._commit_message(msg)
@@ -177,20 +172,27 @@ class KafkaApp:
 
     def _process_message(self, msg):
         """
-        Process a single message
+        Process a single message by calling all subscribed user functions
         """
-        topic = msg.topic()
-        subs = self._get_subs(topic)
         input_bytes = msg.value()
+        topic = msg.topic()
+
+        subs = self._get_subs(topic)
         self.logger.debug(f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
         for func, publish_to, accepts, returns in subs:
-            self.logger.debug(f'Calling user function "{func.__name__}"')
-            input_obj = self._parse(input_bytes, accepts)
-            for output_obj, key in func(input_obj):
-                if publish_to is None: continue
-                key = self._keyify(key)
-                output_bytes = self._serialize(output_obj, returns)
-                yield output_bytes, key, publish_to
+            try:
+                input_obj = self._parse(input_bytes, accepts)
+                outputs = func(input_obj)
+                self.logger.info(f'User function "{func.__name__}" completed successfully')
+                for output_obj, key in outputs:
+                    if publish_to is None: continue
+                    key = self._keyify(key)
+                    output_bytes = self._serialize(output_obj, returns)
+                    yield output_bytes, key, publish_to
+            except Exception as e:
+                self.logger.error(f'User function "{func.__name__}" raised an exception: {e}')
+                self.logger.exception(e)
+
 
     def _parse(self, input_bytes, accepts):
         if accepts == 'bytes':
@@ -254,9 +256,4 @@ class KafkaApp:
         Decorator for user callbacks
         """
         self.on_processed_callbacks.append(func)
-        return func
-
-
-    def on_failure(self, func):
-        self.on_failed_callbacks.append(func)
         return func

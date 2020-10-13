@@ -40,9 +40,6 @@ def add_one(input):
 def done(msg, seconds_elapsed):
     app.logger.info(f'Processed message in {seconds_elapsed} seconds')
 
-@app.on_failure
-def done(msg, error):
-    app.logger.error(f'An error occured: {error}')
 
 if __name__ == '__main__':
   app.run()
