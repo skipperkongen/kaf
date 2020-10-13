@@ -28,7 +28,7 @@ class KafkaApp:
         self.producer_config = producer_config
         self.processors = []
         self.subs = {}
-        self.logger = logging.getLogger(name)
+        self.logger = logging.getLogger(f'KafkaApp[{name}]')
         self.consumer_batch_size = consumer_batch_size
         self.consumer_timeout = consumer_timeout
         self.on_processed_callbacks = []
@@ -158,14 +158,15 @@ class KafkaApp:
                                 except Exception as e_inner:
                                     self.logger.exception(e)
                     except Exception as e:
+                        self.logger.error(f'An error occured in run loop: {e}')
                         self.logger.exception(e)
                     finally:
                         try:
                             self._commit_message(msg)
                             self.logger.info(f'Input message[{i}] committed')
                         except Exception as e:
-                            self.logger.exception(e)
                             self.logger.error(f'Input message[{i}] not committed')
+                            self.logger.exception(e)
 
             iter_t1 = time.perf_counter()
             self.logger.debug(f'Iteration completed in {iter_t1 - iter_t0} seconds')
