@@ -141,6 +141,8 @@ class KafkaApp:
                         else:
                             # Call user functions
                             process_output = self._process_message(msg)
+                            # Materialise output, so that user functions are forced to complete
+                            process_output = list(process_output)
                             # Publish results
                             for j, (value, key, publish_to) in enumerate(process_output):
                                 j += 1
