@@ -50,8 +50,8 @@ class KafkaApp:
         Try to initialise until successful
         """
         self.logger.info('Trying to initialise clients...')
-        #self.consumer = Consumer(self.consumer_config)
-        #self.producer = Producer(self.producer_config)
+        self.consumer = Consumer(self.consumer_config)
+        self.producer = Producer(self.producer_config)
         topics = list(self.subs.keys())
         self.logger.debug(f'Subscribing to topics: {topics}')
         self.consumer.subscribe(topics)
@@ -149,7 +149,7 @@ class KafkaApp:
                                     value=value,
                                     publish_to=publish_to
                                 )
-                                self.logger.info(f'Output message[{j}] produced')
+                                self.logger.info(f'Output message[{j}] produced to topic "{publish_to}" on broker(s) {self.producer_config["bootstrap.servers"]}')
                             # We don't care if callback raises an Exception
                             t1 = time.perf_counter()
                             for callback in self.on_processed_callbacks:
