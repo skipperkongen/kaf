@@ -110,10 +110,12 @@ class KafkaApp:
             self.logger.debug('Iteration started')
 
             # Try to consume messages until successful
-            self.logger.info('Consuming messages')
+            self.logger.info(
+                f"Consuming messages. Topics: {self.consumer.list_topics()},  Partitions: {self.consumer.assignment()}")
             msgs = self._consume_messages()
             if len(msgs) == 0:
-                self.logger.info(f'No messages consumed for {self.consumer_timeout} seconds')
+                self.logger.info(
+                    f'No messages consumed for {self.consumer_timeout} seconds')
             else:
                 self.logger.info(f'Consumed {len(msgs)} message(s)')
             for i, msg in enumerate(msgs):
@@ -122,56 +124,58 @@ class KafkaApp:
                 # Case 2: msg was processed successfully => commit
                 # Case 3: msg processing failed => don't commit
 
-                    # Completely process each message before continuing to next
-                    try:
-                        i += 1
-                        t0 = time.perf_counter()
-                        self.logger.info(f'Input message[{i}] processing started')
+                # Completely process each message before continuing to next
+                try:
+                    i += 1
+                    t0 = time.perf_counter()
+                    self.logger.info(f'Input message[{i}] processing started')
 
-                        error = msg.error()
-                        if error is not None:
-                            # Case 1a / 1b
-                            if error.code() == KafkaError._PARTITION_EOF:
-                                self.logger.info(
-                                    f' {msg.topic()}[{msg.partition()}] reached end \
+                    error = msg.error()
+                    if error is not None:
+                        # Case 1a / 1b
+                        if error.code() == KafkaError._PARTITION_EOF:
+                            self.logger.info(
+                                f' {msg.topic()}[{msg.partition()}] reached end \
                                     of offset {msg.offset()}'
-                                )
-                            else:
-                                self.logger.error(error)
+                            )
                         else:
-                            # Call user functions
-                            process_output = self._process_message(msg)
-                            # Materialise output, so that user functions are forced to complete
-                            process_output = list(process_output)
-                            # Publish results
-                            for j, (value, key, publish_to) in enumerate(process_output):
-                                j += 1
-                                self._produce_message(
-                                    key=key,
-                                    value=value,
-                                    publish_to=publish_to
-                                )
-                                self.logger.info(f'Output message[{j}] produced to topic "{publish_to}" on broker(s) {self.producer_config["bootstrap.servers"]}')
-                            # We don't care if callback raises an Exception
-                            t1 = time.perf_counter()
-                            for callback in self.on_processed_callbacks:
-                                try:
-                                    callback(msg, t1 - t0)
-                                except Exception as e_inner:
-                                    self.logger.exception(e)
+                            self.logger.error(error)
+                    else:
+                        # Call user functions
+                        process_output = self._process_message(msg)
+                        # Materialise output, so that user functions are forced to complete
+                        process_output = list(process_output)
+                        # Publish results
+                        for j, (value, key, publish_to) in enumerate(process_output):
+                            j += 1
+                            self._produce_message(
+                                key=key,
+                                value=value,
+                                publish_to=publish_to
+                            )
+                            self.logger.info(
+                                f'Output message[{j}] produced to topic "{publish_to}" on broker(s) {self.producer_config["bootstrap.servers"]}')
+                        # We don't care if callback raises an Exception
+                        t1 = time.perf_counter()
+                        for callback in self.on_processed_callbacks:
+                            try:
+                                callback(msg, t1 - t0)
+                            except Exception as e_inner:
+                                self.logger.exception(e)
+                except Exception as e:
+                    self.logger.error(f'An error occured in run loop: {e}')
+                    self.logger.exception(e)
+                finally:
+                    try:
+                        self._commit_message(msg)
+                        self.logger.info(f'Input message[{i}] committed')
                     except Exception as e:
-                        self.logger.error(f'An error occured in run loop: {e}')
+                        self.logger.error(f'Input message[{i}] not committed')
                         self.logger.exception(e)
-                    finally:
-                        try:
-                            self._commit_message(msg)
-                            self.logger.info(f'Input message[{i}] committed')
-                        except Exception as e:
-                            self.logger.error(f'Input message[{i}] not committed')
-                            self.logger.exception(e)
 
             iter_t1 = time.perf_counter()
-            self.logger.debug(f'Iteration completed in {iter_t1 - iter_t0} seconds')
+            self.logger.debug(
+                f'Iteration completed in {iter_t1 - iter_t0} seconds')
 
     def _process_message(self, msg):
         """
@@ -181,21 +185,24 @@ class KafkaApp:
         topic = msg.topic()
 
         subs = self._get_subs(topic)
-        self.logger.debug(f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
+        self.logger.debug(
+            f'Found {len(subs)} function(s) subscribed to topic "{topic}"')
         for func, publish_to, accepts, returns in subs:
             try:
                 input_obj = self._parse(input_bytes, accepts)
                 outputs = func(input_obj)
-                self.logger.info(f'User function "{func.__name__}" completed successfully')
+                self.logger.info(
+                    f'User function "{func.__name__}" completed successfully')
                 for output_obj, key in outputs:
-                    if publish_to is None: continue
+                    if publish_to is None:
+                        continue
                     key = self._keyify(key)
                     output_bytes = self._serialize(output_obj, returns)
                     yield output_bytes, key, publish_to
             except Exception as e:
-                self.logger.error(f'User function "{func.__name__}" raised an exception: {e}')
+                self.logger.error(
+                    f'User function "{func.__name__}" raised an exception: {e}')
                 self.logger.exception(e)
-
 
     def _parse(self, input_bytes, accepts):
         if accepts == 'bytes':
@@ -203,7 +210,8 @@ class KafkaApp:
         elif accepts == 'json':
             return json.loads(input_bytes)
         else:
-            raise TypeError(f'Unsupported value for accepts parameter: {accepts}')
+            raise TypeError(
+                f'Unsupported value for accepts parameter: {accepts}')
 
     def _keyify(self, key):
         if key is None:
@@ -218,22 +226,24 @@ class KafkaApp:
         if returns == 'bytes':
             # Assert that already serialized
             if type(output_obj) != bytes:
-                raise TypeError(f'User function should return bytes, but returned {type(output_obj)}')
+                raise TypeError(
+                    f'User function should return bytes, but returned {type(output_obj)}')
             return output_obj
         elif returns == 'json':
             try:
                 return json.dumps(output_obj).encode('utf-8')
             except:
-                raise TypeError(f'User function returned value that can not be serialized to JSON: {output_obj}')
+                raise TypeError(
+                    f'User function returned value that can not be serialized to JSON: {output_obj}')
         else:
-            raise TypeError(f'User function returned unsupported type: {type(output_obj)}')
+            raise TypeError(
+                f'User function returned unsupported type: {type(output_obj)}')
 
     def _get_subs(self, topic):
         """
         Returns a list of user functions subscriptions on a a topic.
         """
         return self.subs.get(topic) or []
-
 
     def process(self, topic, publish_to=None, accepts='bytes', returns='bytes'):
         """
@@ -247,12 +257,12 @@ class KafkaApp:
         """
         assert(accepts in ['bytes', 'json'])
         assert(returns in ['bytes', 'json'])
+
         def process_decorator(func):
             sub = (func, publish_to, accepts, returns)
             self.subs.setdefault(topic, []).append(sub)
             return func
         return process_decorator
-
 
     def on_processed(self, func):
         """
